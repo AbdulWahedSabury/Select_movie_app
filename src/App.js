@@ -1,114 +1,136 @@
-import { useEffect, useRef, useState } from "react";
-import NavBar from "./components/NavBar"
-import Search from "./components/Search";
-import NumResults from "./components/NumResults";
+import { useEffect } from "react";
+import Header from "./components/Header";
 import Main from "./components/Main";
-import Box from "./components/Box";
-import Loading from "./components/Loading";
-import ErrorMsg from "./components/ErrorMsg";
-import MovieList from "./components/MovieList";
-import MovieDetails from "./components/MoiveDetails";
-import WatchedSummary from "./components/WatchedSummary";
-import WatchedMoviesList from "./components/WatchedMoviesList";
+import Loader from "./components/Loader";
+import Error from "./components/Error";
+import { useReducer } from "react";
+import StartPage from "./components/StartPage";
+import Question from "./components/Question";
+import NextButton from "./components/NextButton";
+import Progress from "./components/Progress";
+import FinishedScreen from "./components/FinishedSecren";
 
-const apikey = "2e1d66c3";
-
-export default function App() {
-  const [movies, setMovies] = useState([]);
-
-  const [watched, setWatched] = useState(function(){
-    const watched = localStorage.getItem('watched');
-    return JSON.parse(watched);
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(null);
-
-  function handleSelectMovie(id) {
-    setSelectedId((selectedId) => (selectedId === id ? null : id));
+function reducer(state, action) {
+  switch (action.type) {
+    case "dataReceived":
+      return {
+        ...state,
+        questions: action.payload,
+        status: "ready",
+      };
+    case "start":
+      return {
+        ...state,
+        status: "active",
+      };
+    case "nextQuestion":
+      return {
+        ...state,
+        index: state.index + 1,
+        userAnswer: null,
+      };
+    case "dataFailed":
+      return {
+        ...state,
+        status: "error",
+      };
+    case "answered":
+      const question = state.questions.at(state.index);
+      return {
+        ...state,
+        userAnswer: action.payload,
+        points:
+          action.payload === question.correctOption
+            ? question.points + state.points
+            : 0,
+      };
+    case "finish":
+      return {
+        ...state,
+        status: "finished",
+        hightestScore:
+          state.hightestScore > state.points
+            ? state.hightestScore
+            : state.points,
+      };
+    case "restart":
+      return {
+        ...initialState,
+        questions: state.questions,
+        status: "ready",
+      };
+    default:
+      throw new Error("something is wrong try again later.");
   }
-
-  function handleAddMovie (movie){
-    setWatched((watched) => [...watched, movie]);
-  }
-  function handleCancelSelectedId() {
-    setSelectedId(null);
-  }
-  function handleRemoveMovie (id){
-    setWatched((watched) => watched.filter((movie) => movie.imdbID !== id));
-  }
-  useEffect(function(){
-    localStorage.setItem('watched',JSON.stringify(watched));
-  },[watched])
-  
-  useEffect(
-    function () {
-      async function fetchMovies() {
-        try {
-          setIsLoading(true);
-          setError("");
-          const response = await fetch(
-            `http://www.omdbapi.com/?apikey=${apikey}&s=${query}`
-          );
-
-          if (!response.ok) {
-            throw new Error("some Thing is wrong please try again");
-          }
-          const data = await response.json();
-          if (data.Response === "False") {
-            throw new Error("Movies not found.");
-          }
-          setMovies(data.Search);
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setIsLoading(false);
-        }
-        if (query.length < 3) {
-          setMovies([]);
-          setError();
-          return;
-        }
-      }
-      fetchMovies();
-    },
-    [query]
-  );
-  
-  return (
-    <>
-      <NavBar>
-        <Search query={query} setQuery={setQuery} />
-        <NumResults movies={movies} />
-      </NavBar>
-      <Main>
-        <Box>
-          {isLoading && <Loading />}
-          {error && <ErrorMsg error={error} />}
-          {!isLoading && !error && (
-            <MovieList handleSelectMovie={handleSelectMovie} movies={movies} />
-          )}
-        </Box>
-
-        <Box>
-          {selectedId ? (
-            <MovieDetails
-              onAddMovie = {handleAddMovie}
-              id={selectedId}
-              handleCancelSelectedId={handleCancelSelectedId}
-              apikey={apikey}
-              watched={watched}
-            />
-          ) : (
-            <>
-              <WatchedSummary watched={watched} />
-              <WatchedMoviesList onRemoveMovie={handleRemoveMovie} watched={watched} />
-            </>
-          )}
-        </Box>
-      </Main>
-    </>
-  );
 }
 
+const initialState = {
+  questions: [],
+  status: "loading",
+  index: 0,
+  userAnswer: null,
+  points: 0,
+  hightestScore: 0,
+};
+
+export default function App() {
+  const [
+    { questions, status, index, userAnswer, points, hightestScore },
+    dispatch,
+  ] = useReducer(reducer, initialState);
+
+  const numOfQuestions = questions.length;
+  const maxPoint = questions.reduce((acc, curr) => acc + curr.points, 0);
+
+  useEffect(function () {
+    fetch("http://localhost:9000/questions")
+      .then((res) => res.json())
+      .then((data) => dispatch({ type: "dataReceived", payload: data }))
+      .catch((error) => dispatch({ type: "dataFailed" }));
+  }, []);
+
+  console.log(hightestScore);
+
+  return (
+    <div className="app">
+      <Header />
+      <Main>
+        {status === "loading" && <Loader />}
+        {status === "error" && <Error />}
+        {status === "ready" && (
+          <StartPage numOfQuestions={numOfQuestions} dispatch={dispatch} />
+        )}
+        {status === "active" && (
+          <>
+            <Progress
+              questionNum={numOfQuestions}
+              index={index}
+              userAnswer={userAnswer}
+              points={points}
+              maxPoint={maxPoint}
+            />
+            <Question
+              question={questions[index]}
+              userAnswer={userAnswer}
+              dispatch={dispatch}
+            />
+            <NextButton
+              dispatch={dispatch}
+              answer={userAnswer}
+              index={index}
+              numOfQuestions={numOfQuestions}
+            />
+          </>
+        )}
+        {status === "finished" && (
+          <FinishedScreen
+            dispatch={dispatch}
+            points={points}
+            highscore={hightestScore}
+            maxPossiblePoints={maxPoint}
+          />
+        )}
+      </Main>
+    </div>
+  );
+}
